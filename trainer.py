@@ -60,14 +60,7 @@ class Trainer:
     """
 
     def __init__(
-        self,
-        *,
-        trainer_config,
-        z_pins,
-        params,
-        invparams,
-        writer,
-        device,
+        self, *, trainer_config, z_pins, params, invparams, writer, device,
     ):
         self.z_pins = z_pins
         self.scalar_calculator = MovementScalarCalculator(z_pins=z_pins, device=device)
@@ -212,6 +205,8 @@ class Trainer:
         """
         This method runs backpropagation on the neural network.
         """
+        num_data_points = x_pt.shape[0]
+
         model.train()
 
         # Zero out all the gradients before running the backward pass.
@@ -220,7 +215,7 @@ class Trainer:
         ############################ loss_z #######################################
         # It is necessary to sample from the entire radius plus the movement to ensure that
         # the targets land in places in Z that are inverse reconstruciotn trained.
-        z_pins = self.z_pins.sample(x_pt.shape[0], 1.0 + self.movement)
+        z_pins = self.z_pins.sample(num_data_points, 1.0 + self.movement)
         z_pins_y = model.forward_z(x_pt, z_pins)
         z_pins_z = model.forward_y(x_pt, z_pins_y)
         lossz = self.loss_mse(z_pins_z, z_pins)
@@ -251,7 +246,7 @@ class Trainer:
         # Log the losses.
         self.writer.log_loss_z(lossz / (z_pins.shape[0] * z_pins_y.shape[1]), iteration)
         # Loss-y has to be recalculated using the mean. As opposed to sum -> mean.
-        lossy = ((y_pt - y_pt_y) ** 2).mean()
+        lossy = ((y_pt - y_pt_y) ** 2).mean().cpu().detach()
         self.writer.log_loss_y(lossy, iteration)
         self.writer.log_loss_p(loss_p, iteration)
 
@@ -270,8 +265,7 @@ class Trainer:
         with torch.no_grad():
             z_y_match = model.forward_y(x_pt, y_pt)
         z_y_match_radios = ((z_y_match - z_pins_offset) ** 2).sum(dim=1).sqrt()
-        outside = z_y_match_radios > z_pins_radio
-        num_outside = torch.where(outside)[0].shape[0]
+        num_outside = (z_y_match_radios > z_pins_radio).sum()
 
         self.writer.log_out_ratio(num_outside / num_data_points, iteration)
 
